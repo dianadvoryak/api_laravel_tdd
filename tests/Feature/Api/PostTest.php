@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature;
+namespace Feature\Api;
 
 // use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Models\Post;
@@ -17,16 +17,9 @@ class PostTest extends TestCase
     {
         parent::setUp();
         Storage::fake('local');
-    }
-
-    /**
-     * A basic test example.
-     */
-    public function test_the_application_returns_a_successful_response(): void
-    {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
+        $this->withHeaders([
+            'accept' => 'application/json',
+            ]);
     }
 
     /** @test */
@@ -41,9 +34,7 @@ class PostTest extends TestCase
             'image' => $file,
         ];
 
-        $res = $this->post('/posts', $data);
-
-        $res->assertOk();
+        $res = $this->post('api/posts', $data);
 
         $this->assertDatabaseCount('posts', 1);
 
@@ -54,7 +45,17 @@ class PostTest extends TestCase
         $this->assertEquals('images/' . $file->hashName(), $post->image);
 
         Storage::disk('local')->assertExists($post->image);
+
+        $res->assertJson([
+            'id' => $post->id,
+            'title' => $post->title,
+            'description' => $post->description,
+            'image' => $post->image,
+//            'created_at' => $post->created_at->format('Y-m-d'),
+//            'updated_at' => $post->updated_at->format('Y-m-d'),
+        ]);
     }
+
 
     /** @test */
     public function attribute_title_is_required_for_storing_post()
@@ -65,9 +66,9 @@ class PostTest extends TestCase
             'image' => '',
         ];
 
-        $res = $this->post('/posts', $data);
+        $res = $this->post('/api/posts', $data);
 
-        $res->assertRedirect();
+        $res->assertStatus(422);
         $res->assertInvalid('title');
     }
 
@@ -82,8 +83,11 @@ class PostTest extends TestCase
 
         $res = $this->post('/posts', $data);
 
-        $res->assertRedirect();
+        $res->assertStatus(422);
         $res->assertInvalid('image');
+//        $res->assertJsonValidationErrorFor([
+//            'image' => 'The image field must be a file.'
+//        ]);
     }
 
     /** @test */
@@ -100,17 +104,17 @@ class PostTest extends TestCase
             'image' => $file,
         ];
 
-        $res = $this->patch('/posts/' . $post->id, $data);
+        $res = $this->patch('/api/posts/' . $post->id, $data);
 
-        $res->assertOk();
+        $res->assertJson([
+            'id' => $post->id,
+            'title' => $data['title'],
+            'description' => $data['description'],
+            'image' => 'images/' . $file->hashName(),
+        ]);
 
         $updatePost = Post::first();
 
-        $this->assertEquals($data['title'], $updatePost->title);
-        $this->assertEquals($data['description'], $updatePost->description);
-//        $this->assertEquals('images/' . $file->hashName(), $updatePost->image);
-
-        $this->assertEquals($post->id, $updatePost->id);
     }
 
     /** @test */
@@ -120,27 +124,36 @@ class PostTest extends TestCase
 
         $posts = Post::factory(10)->create();
 
-        $res = $this->get('/posts');
+        $res = $this->get('/api/posts');
 
-        $res->assertViewIs('posts.index');
+        $res->assertOk();
 
-        $res->assertSeeText('View page');
+        $json = $posts->map(function ($post) {
+            return [
+                'id' => $post->id,
+                'title' => $post->title,
+                'description' => $post->description,
+                'image' => $post->image,
+            ];
+        })->toArray();
 
-        $titles = $posts->pluck('title')->toArray();
-        $res->assertSeeText($titles);
+        $res->assertExactJson($json);
     }
 
     /** @test */
     public function response_for_route_show_index_is_view_post_show_with_single_post()
     {
         $this->withoutExceptionHandling();
-        $posts = Post::factory()->create();
+        $post = Post::factory()->create();
 
-        $res = $this->get('/posts/' . $posts->id);
-        $res->assertViewIs('posts.show');
-        $res->assertSeeText('Show page');
-        $res->assertSeeText($posts->title);
-        $res->assertSeeText($posts->description);
+        $res = $this->get('/api/posts/' . $post->id);
+
+        $res->assertJson([
+            'id' => $post->id,
+            'title' => $post->title,
+            'description' => $post->description,
+            'image' => $post->image,
+        ]);
     }
 
     /** @test */
@@ -150,29 +163,25 @@ class PostTest extends TestCase
 
         $user = \App\Models\User::factory()->create();
         $post = Post::factory()->create();
-        $res = $this->actingAs($user)->delete('/posts/' . $post->id);
+        $res = $this->actingAs($user)->delete('/api/posts/' . $post->id);
 
         $res->assertOk();
 
         $this->assertDatabaseCount('posts', 0);
+
+        $res->assertJson([
+            'message' => 'deleted',
+        ]);
     }
 
     /** @test */
     public function a_post_can_be_deleted_by_only_auth_user()
     {
         $post = Post::factory()->create();
-        $res = $this->delete('/posts/' . $post->id);
-        $res->assertRedirect();
+        $res = $this->delete('/api/posts/' . $post->id);
+        $res->assertStatus(401);
+        $res->assertUnauthorized();
+
         $this->assertDatabaseCount('posts', 1);
     }
-
-//    /** @test */
-//    public function a_post_can_be_deleted_by_only_admin()
-//    {
-//        $post = Post::factory()->create();
-//        $user = \App\Models\User::factory()->create();
-//        $user->isAdmin = 0;
-//        $res = $this->actingAs($user)->delete('/posts/' . $post->id);
-//        $res->assertRedirect();
-//    }
 }
